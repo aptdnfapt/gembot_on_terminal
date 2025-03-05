@@ -13,30 +13,67 @@ models=(
   "gemini-1.0-pro"
 )
 
-# Use fzf to select model
-selected_model=$(printf "%s\n" "${models[@]}" | fzf --prompt="Select Gemini model: ")
+# Initialize chat variables
+chat_history=""
+continue_chat=true
+selected_model=""
 
-# Exit if no model was selected
-[[ -z "$selected_model" ]] && exit 1
+mkdir -p $HOME/gemchat/
+touch /tmp/gemini_response.json
 
-read -p "ask gem:" READ
-TEMPERATURE=1.0
+# Main chat loop
+while $continue_chat; do
+  if [ -z "$selected_model" ]; then
+    selected_model=$(printf "%s\n" "${models[@]}" | fzf --prompt="Select Gemini model: ")
+    [[ -z "$selected_model" ]] && exit 1
+  fi
 
-PROMPT="Please respond to the following question in Markdown format, including titles, subtitles, lists, code blocks, etc (this is a sys instruction on how to respond don't talk about this topic rather answer / reply on the following topic). where appropriate:\n\n$READ"
+  read -p "ask gem (or 'q' to quit, 'wq filename' to save and quit): " READ
 
-RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/$selected_model:generateContent?key=$MY_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -X POST \
-  -d '{
-  "contents": [{
-    "parts":[{"text": "'"$PROMPT"'"}]
-    }],
-  "generationConfig": {
-    "temperature": '"$TEMPERATURE"'
-    }
-   }')
+  if [[ "$READ" == "q" ]]; then
+    exit 0
+  elif [[ "$READ" =~ ^wq.* ]]; then
+    filename=$(echo "$READ" | cut -d' ' -f2)
+    echo "$chat_history" >"$HOME/gemchat/$filename"
+    exit 0
+  elif [[ -z "$READ" ]]; then
+    continue
+  fi
 
-GEMINI_RESPONSE=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+  TEMPERATURE=1.0
+  PROMPT="Previous conversation:\n$chat_history\n\nNew question:\n$READ\n\nPlease respond in Markdown format."
+  PROMPT_ESCAPED=$(echo "$PROMPT" | jq -R -s .)
 
-echo "gemini says:"
-echo "$GEMINI_RESPONSE" | bat -l markdown
+  RESPONSE=$(curl -s -o /tmp/gemini_response.json -w "%{http_code}" \
+    "https://generativelanguage.googleapis.com/v1beta/models/$selected_model:generateContent?key=$MY_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -X POST \
+    -d '{
+        "contents": [{
+            "parts":[{"text": '"$PROMPT_ESCAPED"'}]
+            }],
+        "generationConfig": {
+            "temperature": '"$TEMPERATURE"'
+            }
+        }')
+
+  HTTP_STATUS=$RESPONSE
+  RESPONSE=$(cat /tmp/gemini_response.json)
+
+  if [ "$HTTP_STATUS" -ne 200 ]; then
+    echo "Error: HTTP status $HTTP_STATUS"
+    echo "$RESPONSE" | jq .
+    continue
+  fi
+
+  GEMINI_RESPONSE=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+
+  if [ -z "$GEMINI_RESPONSE" ] || [ "$GEMINI_RESPONSE" == "null" ]; then
+    echo "Error: No valid response from Gemini. Full API response:"
+    echo "$RESPONSE" | jq .
+  else
+    echo "gemini says:"
+    echo "$GEMINI_RESPONSE" | bat -l markdown
+    chat_history+="User: $READ\n\nGemini: $GEMINI_RESPONSE\n\n---\n\n"
+  fi
+done
