@@ -1,4 +1,6 @@
-# gembot_on_terminal
+# CHECK OUT Oliveowl a better version of this . ![link][https://github.com/aptdnfapt/OliveOwl]
+
+## gembot_on_terminal
 ![Screenshot](Screenshot_2025-03-03_06-41-25.png)
 ![Screenshot](Screenshot_2025-03-03_06-52-16.png)
 ![Screenshot](Screenshot_2025-03-03_06-40-55.png)
